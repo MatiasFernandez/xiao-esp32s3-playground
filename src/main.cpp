@@ -2,6 +2,7 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 #define LED_ON LOW
 #define LED_OFF HIGH
@@ -11,6 +12,9 @@
 
 // Battery measurement pin and ADC settings
 #define BAT_LEVEL D2
+
+// Scope signal pin for power measurement timing
+#define SIGNAL_PIN D4
 
 // ADC conversion constants
 #define ADC_BITS 12
@@ -63,6 +67,9 @@ void setup() {
   boot_time = micros();
 
   WiFi.mode(WIFI_OFF);
+  WiFi.disconnect(true);
+  esp_wifi_stop();
+  btStop();
 
   delay(500);
 
@@ -73,9 +80,9 @@ void setup() {
   Serial.print("Boot time: ");
   Serial.println(boot_time);
 
-  pinMode(LED_BUILTIN, OUTPUT);
   pinMode(ONE_WIRE_BUS_ENABLE, OUTPUT);
   pinMode(BAT_LEVEL, INPUT);
+  pinMode(SIGNAL_PIN, OUTPUT);
 
   // Configure ADC attenuation for ESP32: use 11 dB to extend measurable input range (~ up to Vref)
   // Use ESP32 Arduino core attenuation constant
@@ -86,29 +93,13 @@ void setup() {
 
   logElapsedTime("setup", "ADC initialized");
 
-  enableOneWirePower();
-
-  sensors.begin();
-
-  logElapsedTime("setup", "Sensors initialized");
-
-  // Set DS18B20 resolution (9..12 bits) for the first sensor
-  DeviceAddress address;
-
-  if (sensors.getAddress(address, 0)) {
-    sensors.setResolution(address, 9); // set to 9-bit (valid: 9,10,11,12)
-    Serial.println("Sensor resolution set to 9 bits");
-  }
-
-  logElapsedTime("setup", "Sensor resolution set");
-
-  disableOneWirePower();
-
   logElapsedTime("setup", "Setup completed");
 }
 
 void loop() {
   logElapsedTime("loop", "Starting loop");
+
+  digitalWrite(SIGNAL_PIN, HIGH);
 
   float adcSingle = analogRead(BAT_LEVEL);
 
@@ -140,15 +131,37 @@ void loop() {
   Serial.print(vBatt, 3);
   Serial.println("V");
 
+  digitalWrite(SIGNAL_PIN, LOW);
+
   logElapsedTime("loop", "Enabling OneWire power");
 
   enableOneWirePower();
 
+  sensors.begin();
+
+  digitalWrite(SIGNAL_PIN, HIGH);
+
+  logElapsedTime("loop", "Sensors initialized");
+
+  // Set DS18B20 resolution (9..12 bits) for the first sensor
+  DeviceAddress address;
+
+  if (sensors.getAddress(address, 0)) {
+    sensors.setResolution(address, 9); // set to 9-bit (valid: 9,10,11,12)
+    Serial.println("Sensor resolution set to 9 bits");
+  }
+
+  digitalWrite(SIGNAL_PIN, LOW);
+
+  logElapsedTime("loop", "Sensor resolution set");
+
   logElapsedTime("loop", "Requesting temperature");
-  unsigned long t0 = micros();               // start timer (use millis() if you prefer ms precision)
-  sensors.requestTemperatures(); // send conversion command
-  unsigned long t1 = micros();               // end timer
-  
+  unsigned long t0 = micros();
+  sensors.requestTemperatures();
+  unsigned long t1 = micros();
+
+  digitalWrite(SIGNAL_PIN, HIGH);
+
   logElapsedTime("loop", "Temperature Conversion complete");
 
   float durationMs = (t1 - t0) / 1000.0;     // convert µs to ms with fraction
@@ -160,12 +173,13 @@ void loop() {
 
   float tempC = sensors.getTempCByIndex(0); // read first sensor
 
+    digitalWrite(SIGNAL_PIN, LOW);
+
   logElapsedTime("loop", "Temperature read");
 
   disableOneWirePower();
 
   logElapsedTime("loop", "OneWire power disabled");
-
 
   if (tempC == DEVICE_DISCONNECTED_C) {
     Serial.println("Sensor DS18B20 desconectado");
@@ -175,18 +189,8 @@ void loop() {
     Serial.println(" °C");
   }
 
-  logElapsedTime("loop", "Turning ON LED");
+  delay(500);
 
-  digitalWrite(LED_BUILTIN, LED_OFF);
-
-  delay(200);
-
-  logElapsedTime("loop", "Turning OFF LED");
-
-  digitalWrite(LED_BUILTIN, LED_OFF);
-
-  delay(200);
-
-  logElapsedTime("loop", "Loop completed");
+  logElapsedTime("loop", "Loop complete");
 }
 
